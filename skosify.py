@@ -10,37 +10,25 @@ import sys
 import time
 
 try:
-  from rdflib import URIRef, BNode, Literal, Namespace, RDF, RDFS
+  from RDF import Model, NS, Uri, Node, Statement, HashStorage, Parser, Serializer
 except ImportError:
-  print >>sys.stderr, "You need to install the rdflib Python library (http://rdflib.net)."
-  print >>sys.stderr, "On Debian/Ubuntu, try: sudo apt-get install python-rdflib"
+  print >>sys.stderr, "You need to install the librdf Python library (http://librdf.org)."
+  print >>sys.stderr, "On Debian/Ubuntu, try: sudo apt-get install python-librdf"
   sys.exit(1)
 
-try:
-  # rdflib 2.4.x simple Graph
-  from rdflib.Graph import Graph
-  RDFNS = RDF.RDFNS
-  RDFSNS = RDFS.RDFSNS
-except ImportError:
-  # rdflib 3.0.0 Graph
-  from rdflib import Graph
-  RDFNS = RDF.uri
-  RDFSNS = RDFS.uri
-
-# use custom memory-saving context-aware Store implementation
-from setstore import IOMemory
-
 # namespace defs
-SKOS = Namespace("http://www.w3.org/2004/02/skos/core#")
-SKOSEXT = Namespace("http://purl.org/finnonto/schema/skosext#")
-OWL = Namespace("http://www.w3.org/2002/07/owl#")
-DC = Namespace("http://purl.org/dc/elements/1.1/")
-DCT = Namespace("http://purl.org/dc/terms/")
+RDF = NS("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
+RDFS = NS("http://www.w3.org/2000/01/rdf-schema#")
+SKOS = NS("http://www.w3.org/2004/02/skos/core#")
+SKOSEXT = NS("http://purl.org/finnonto/schema/skosext#")
+OWL = NS("http://www.w3.org/2002/07/owl#")
+DC = NS("http://purl.org/dc/elements/1.1/")
+DCT = NS("http://purl.org/dc/terms/")
 
 # default namespaces to register in the graph
 DEFAULT_NAMESPACES = {
-  'rdf': RDFNS,
-  'rdfs': RDFSNS,
+  'rdf': RDF,
+  'rdfs': RDFS,
   'owl': OWL,
   'skos': SKOS,
   'dc': DC,
@@ -175,32 +163,32 @@ def find_prop_overlap(rdf, prop1, prop2):
       yield (s,o)
 
 def read_input(filename, fmt):
-  """Read the given RDF file and return an rdflib Graph object."""
-  if filename == '-':
-    f = sys.stdin
-  else:
-    f = open(filename, 'r')
+  """Read the given RDF file and return an librdf Model object."""
   
   if not fmt:
     # determine format based on file extension
-    fmt = 'xml' # default
-    if filename.endswith('n3'): fmt = 'n3'
-    if filename.endswith('ttl'): fmt = 'n3'
+    fmt = 'rdfxml' # default
+    if filename.endswith('nt'): fmt = 'ntriples'
+    if filename.endswith('n3'): fmt = 'turtle'
+    if filename.endswith('ttl'): fmt = 'turtle'
 
-  store = IOMemory()
-  rdf = Graph(store)
-#  rdf = Graph()
-
-  rdf.parse(f, format=fmt)
+  store = HashStorage("skosify", options="hash-type='memory'")
+  rdf = Model(store)
+  parser = Parser(name=fmt)
+  
+  if filename == '-':
+    data = sys.stdin.read()
+    parser.parse_string_into_model(rdf, data, "http://example.org")
+  else:
+    parser.parse_into_model(rdf, "file:" + filename)
+  
   return rdf
-
-def setup_namespaces(rdf, namespaces):
-  for prefix, uri in namespaces.items():
-    rdf.namespace_manager.bind(prefix, uri)
 
 def get_concept_scheme(rdf):
   """Return a skos:ConceptScheme contained in the model, or None if not present."""
-  return rdf.value(None, RDF.type, SKOS.ConceptScheme, any=True)
+  for cs in rdf.sources(RDF.type, SKOS.ConceptScheme):
+    return cs # the first match
+  return None
 
 def create_concept_scheme(rdf, ns, lname='conceptscheme'):
   """Create a skos:ConceptScheme in the model and return it."""
@@ -209,7 +197,9 @@ def create_concept_scheme(rdf, ns, lname='conceptscheme'):
   if not ns:
     # see if there's an owl:Ontology and use that to determine namespace
     # FIXME what if there are several owl:Ontology instances? (TERO)
-    ont = rdf.value(None, RDF.type, OWL.Ontology, any=True)
+    ont = None
+    for ont in rdf.sources(RDF.type, OWL.Ontology):
+      pass
     if not ont:
       error("No skos:ConceptScheme or owl:Ontology found, please set the vocabulary namespace using --namespace option")
     if ont.endswith('/') or ont.endswith('#'):
@@ -217,10 +207,9 @@ def create_concept_scheme(rdf, ns, lname='conceptscheme'):
     else:
       ns = ont + '/'
   
-  NS = Namespace(ns)
-  cs = NS[lname]
+  cs = NS(ns)[lname]
   
-  rdf.add((cs, RDF.type, SKOS.ConceptScheme))
+  rdf.append(Statement(cs, RDF.type, SKOS.ConceptScheme))
   
   if ont is not None:
     rdf.remove((ont, RDF.type, OWL.Ontology))
@@ -687,20 +676,23 @@ def check_hierarchy(rdf):
   debug("check_hierarchy took %f seconds" % (endtime-starttime))
       
 
-def write_output(rdf, filename, fmt):
+def write_output(rdf, filename, fmt, namespaces):
   """Serialize the RDF output to the given file (or - for stdout)."""
-  if filename == '-':
-    out = sys.stdout
-  else:
-    out = open(filename, 'w')
-  
   if not fmt:
     # determine output format
-    fmt = 'xml' # default
-    if filename.endswith('n3'): fmt = 'n3'
+    fmt = 'rdfxml' # default
+    if filename.endswith('nt'): fmt = 'ntriples'
+    if filename.endswith('n3'): fmt = 'turtle'
     if filename.endswith('ttl'): fmt = 'turtle'
 
-  rdf.serialize(destination=out, format=fmt)
+  serializer = Serializer(name=fmt)
+  for prefix, ns in namespaces.items():
+    serializer.set_namespace(prefix, ns._prefix)
+  
+  if filename == '-':
+    sys.stdout.write(serializer.serialize_model_to_string(rdf))
+  else:
+    serializer.serialize_model_to_file(name="file:" + filename, model=rdf)
 
 def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
   global debugging
@@ -717,49 +709,47 @@ def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
     infer_classes(voc)
     infer_properties(voc)
 
-  setup_namespaces(voc, namespaces)
-  
   # find/create concept scheme
   cs = get_concept_scheme(voc)
   if not cs:
     cs = create_concept_scheme(voc, options.namespace)
 
   # transform concepts, literals and concept relations
-  transform_concepts(voc, cs, typemap)
-  transform_literals(voc, literalmap)
-  transform_relations(voc, relationmap) 
+#  transform_concepts(voc, cs, typemap)
+#  transform_literals(voc, literalmap)
+#  transform_relations(voc, relationmap) 
 
   # special transforms for labels: whitespace, prefLabel vs altLabel
-  transform_labels(voc)
+#  transform_labels(voc)
 
   # special transforms for collections and aggregate concepts
-  transform_collections(voc)
-  transform_aggregate_concepts(voc, cs, relationmap, options.aggregates)
+#  transform_collections(voc)
+#  transform_aggregate_concepts(voc, cs, relationmap, options.aggregates)
 
   # enrichments: broader <-> narrower, related <-> related
-  enrich_relations(voc, options.narrower, options.transitive)
+#  enrich_relations(voc, options.narrower, options.transitive)
 
   # clean up unused/unnecessary class/property definitions and unreachable triples
-  cleanup_properties(voc)
-  cleanup_classes(voc)
-  cleanup_unreachable(voc, cs)
+#  cleanup_properties(voc)
+#  cleanup_classes(voc)
+#  cleanup_unreachable(voc, cs)
   
   # setup inScheme and hasTopConcept
-  setup_concept_scheme(voc, cs)
-  setup_top_concepts(voc)
+#  setup_concept_scheme(voc, cs)
+#  setup_top_concepts(voc)
 
   # check hierarchy for cycles
-  check_hierarchy(voc)
+#  check_hierarchy(voc)
   
   # check for duplicate labels
-  check_labels(voc)
+#  check_labels(voc)
   
 
   processtime = time.time()
 
   # Stage 3: Write output
   
-  write_output(voc, options.output, options.to_format)
+  write_output(voc, options.output, options.to_format, namespaces)
   endtime = time.time()
 
   debug("reading input file %s took  %d seconds" % (inputfile, inputtime - starttime))
@@ -781,8 +771,8 @@ def get_option_parser(defaults):
   parser.add_option('-c', '--config', type='string', help='Read default options and transformation definitions from the given configuration file.')
   parser.add_option('-o', '--output', type='string', help='Output file name. Default is "-" (stdout).')
   parser.add_option('-s', '--namespace', type='string', help='Namespace of vocabulary (usually optional; used to create a ConceptScheme)')
-  parser.add_option('-f', '--from-format', type='string', help='Input format. Default is to detect format based on file extension. Possible values: xml, n3, turtle, nt...')
-  parser.add_option('-F', '--to-format', type='string', help='Output format. Default is to detect format based on file extension. Possible values: xml, n3, turtle, nt...')
+  parser.add_option('-f', '--from-format', type='string', help='Input format. Default is to detect format based on file extension. Possible values: rdfxml, turtle, ntriples...')
+  parser.add_option('-F', '--to-format', type='string', help='Output format. Default is to detect format based on file extension. Possible values: rdfxml, turtle, ntriples...')
   parser.add_option('-i', '--infer', action="store_true", help='Perform RDFS subclass/subproperty inference before transforming input.')
   parser.add_option('-I', '--no-infer', dest="infer", action="store_false", help="Don't perform RDFS subclass/subproperty inference before transforming input.")
   parser.add_option('-N', '--narrower', action="store_true", help='Include narrower/narrowerGeneric/narrowerPartitive relationships in the output vocabulary.')
@@ -816,10 +806,11 @@ def expand_curielike(namespaces, curie):
     return curie
 
   if ns in namespaces:
-    return URIRef(namespaces[ns] + localpart)
+    # FIXME for some reason NS fails on unicode localparts (but not always)
+    return namespaces[ns][str(localpart)]
   else:
     warn("Unknown namespace prefix %s" % ns)
-    return URIRef(curie)
+    return Uri(curie)
 
 def main():
   """Read command line parameters and make a transform based on them"""
@@ -840,7 +831,7 @@ def main():
 
     # parse namespaces from configuration file
     for prefix, uri in cfgparser.items('namespaces'):
-      namespaces[prefix] = URIRef(uri)
+      namespaces[prefix] = NS(uri)
     
     # parse types from configuration file
     for key, val in cfgparser.items('types'):
