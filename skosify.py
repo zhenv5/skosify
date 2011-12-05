@@ -27,12 +27,12 @@ DCT = NS("http://purl.org/dc/terms/")
 
 # default namespaces to register in the graph
 DEFAULT_NAMESPACES = {
-  'rdf': RDF,
-  'rdfs': RDFS,
-  'owl': OWL,
-  'skos': SKOS,
-  'dc': DC,
-  'dct': DCT,
+  'rdf': Uri(RDF._prefix),
+  'rdfs': Uri(RDFS._prefix),
+  'owl': Uri(OWL._prefix),
+  'skos': Uri(SKOS._prefix),
+  'dc': Uri(DC._prefix),
+  'dct': Uri(DCT._prefix),
 }
 
 # default values for config file / command line options
@@ -178,11 +178,11 @@ def read_input(filename, fmt):
   
   if filename == '-':
     data = sys.stdin.read()
-    parser.parse_string_into_model(rdf, data, "http://example.org")
+    parser.parse_string_into_model(rdf, data, "http://example.org/")
   else:
     parser.parse_into_model(rdf, "file:" + filename)
   
-  return rdf
+  return (rdf, parser.namespaces_seen())
 
 def get_concept_scheme(rdf):
   """Return a skos:ConceptScheme contained in the model, or None if not present."""
@@ -687,7 +687,7 @@ def write_output(rdf, filename, fmt, namespaces):
 
   serializer = Serializer(name=fmt)
   for prefix, ns in namespaces.items():
-    serializer.set_namespace(prefix, ns._prefix)
+    serializer.set_namespace(prefix, ns)
   
   if filename == '-':
     sys.stdout.write(serializer.serialize_model_to_string(rdf))
@@ -701,7 +701,9 @@ def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
   starttime = time.time()
 
   # Stage 1: Read input
-  voc = read_input(inputfile, options.from_format)
+  (voc, ns_seen) = read_input(inputfile, options.from_format)
+  namespaces.update(ns_seen)
+  
   inputtime = time.time()
 
   # Stage 2: Process
@@ -806,8 +808,10 @@ def expand_curielike(namespaces, curie):
     return curie
 
   if ns in namespaces:
-    # FIXME for some reason NS fails on unicode localparts (but not always)
-    return namespaces[ns][str(localpart)]
+    uri = unicode(namespaces[ns]) + localpart
+    # for some reason Uri doesn't like calculated unicode objects
+    # so encoding to UTF-8 instead (which redland would do anyway)
+    return Uri(uri.encode('UTF-8'))
   else:
     warn("Unknown namespace prefix %s" % ns)
     return Uri(curie)
@@ -831,7 +835,7 @@ def main():
 
     # parse namespaces from configuration file
     for prefix, uri in cfgparser.items('namespaces'):
-      namespaces[prefix] = NS(uri)
+      namespaces[prefix] = Uri(uri)
     
     # parse types from configuration file
     for key, val in cfgparser.items('types'):
