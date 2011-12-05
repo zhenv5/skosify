@@ -137,10 +137,8 @@ def replace_object(rdf, fromuri, touri, predicate=None):
   """Replace all occurrences of fromuri as object with touri in the given
      model. If touri=None, will delete all occurrences of fromuri instead. If
      predicate is given, modify only triples with the given predicate."""
-  debug("replace_object starting")
   if fromuri == touri: return
-  for stmt in rdf.find_statements(Statement(None, None, fromuri)):
-    if predicate is not None and stmt.predicate != predicate: continue
+  for stmt in rdf.find_statements(Statement(None, predicate, fromuri)):
     del rdf[Statement(stmt.subject, stmt.predicate, fromuri)]
     if touri is not None:
       rdf.append(Statement(stmt.subject, stmt.predicate, touri))
