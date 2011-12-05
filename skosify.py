@@ -319,9 +319,11 @@ def transform_relations(rdf, relationmap):
 
   props = set()
   for t in affected_types:
-    for conc in rdf.subjects(RDF.type, t):
-      for p,o in rdf.predicate_objects(conc):
-        if isinstance(o, (URIRef, BNode)) and (p in relationmap or not in_general_ns(p)):
+    for conc in rdf.sources(RDF.type, t):
+      for stmt in rdf.find_statements(Statement(conc, None, None)):
+        p = stmt.predicate.uri
+        o = stmt.object
+        if o.is_resource() and (p in relationmap or not in_general_ns(p)):
           props.add(p)
   
   for p in props:
@@ -721,7 +723,7 @@ def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
   # transform concepts, literals and concept relations
   transform_concepts(voc, cs, typemap)
   transform_literals(voc, literalmap)
-#  transform_relations(voc, relationmap) 
+  transform_relations(voc, relationmap) 
 
   # special transforms for labels: whitespace, prefLabel vs altLabel
 #  transform_labels(voc)
