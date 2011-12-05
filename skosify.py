@@ -692,7 +692,7 @@ def write_output(rdf, filename, fmt, namespaces):
   if filename == '-':
     sys.stdout.write(serializer.serialize_model_to_string(rdf))
   else:
-    serializer.serialize_model_to_file(name="file:" + filename, model=rdf)
+    serializer.serialize_model_to_file(filename, model=rdf)
 
 def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
   global debugging
