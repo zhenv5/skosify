@@ -337,12 +337,17 @@ def transform_relations(rdf, relationmap):
 def transform_labels(rdf):
   # fix labels with extra whitespace
   for labelProp in (SKOS.prefLabel, SKOS.altLabel, SKOS.hiddenLabel, SKOSEXT.candidateLabel):
-    for conc, label in rdf.subject_objects(labelProp):
+    for stmt in rdf.find_statements(Statement(None, labelProp, None)):
+      conc = stmt.subject.uri
+      label = stmt.object.literal_value['string']
+      lang = stmt.object.literal_value['language']
       if len(label.strip()) < len(label):
         warn("Stripping whitespace from label of %s: '%s'" % (conc, label))
-        newlabel = Literal(label.strip(), label.language)
-        rdf.remove((conc, labelProp, label))
-        rdf.add((conc, labelProp, newlabel))
+        newlabel = Node(literal=label.strip(), language=lang)
+        del rdf[Statement(conc, labelProp, stmt.object)]
+        rdf.append(Statement(conc, labelProp, newlabel))
+
+  return #FIXME candidateLabel not yet implemented with librdf
 
   # make skosext:candidateLabel either prefLabel or altLabel
   
@@ -726,7 +731,7 @@ def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
   transform_relations(voc, relationmap) 
 
   # special transforms for labels: whitespace, prefLabel vs altLabel
-#  transform_labels(voc)
+  transform_labels(voc)
 
   # special transforms for collections and aggregate concepts
 #  transform_collections(voc)
