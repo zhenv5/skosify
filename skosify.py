@@ -69,7 +69,7 @@ def error(str):
 
 def localname(uri):
   """Determine the local name (after namespace) of the given URI"""
-  return uri.split('/')[-1].split('#')[-1]
+  return str(uri).split('/')[-1].split('#')[-1]
 
 def mapping_get(uri, mapping):
   """Look up the URI in the given mapping and return the result. Throws KeyError if no matching mapping was found."""
@@ -101,15 +101,8 @@ def mapping_match(uri, mapping):
 
 def in_general_ns(uri):
   """Return True iff the URI is in a well-known general RDF namespace (RDF, RDFS, OWL, SKOS, DC)"""
-  try:	# rdflib 3.0.0
-    RDFuri = RDF.uri
-    RDFSuri = RDFS.uri
-  except AttributeError: # rdflib 2.4.x
-    RDFuri = RDF.RDFNS
-    RDFSuri = RDFS.RDFSNS
-  
-  for ns in (RDFuri, RDFSuri, OWL, SKOS, DC):
-    if uri.startswith(ns): return True
+  for ns in (RDF, RDFS, OWL, SKOS, DC):
+    if str(uri).startswith(str(ns._prefix)): return True
   return False
 
 def replace_subject(rdf, fromuri, touri):
@@ -144,9 +137,10 @@ def replace_object(rdf, fromuri, touri, predicate=None):
   """Replace all occurrences of fromuri as object with touri in the given
      model. If touri=None, will delete all occurrences of fromuri instead. If
      predicate is given, modify only triples with the given predicate."""
+  debug("replace_object starting")
   if fromuri == touri: return
   for stmt in rdf.find_statements(Statement(None, None, fromuri)):
-    if predicate is not None and p != predicate: continue
+    if predicate is not None and stmt.predicate != predicate: continue
     del rdf[Statement(stmt.subject, stmt.predicate, fromuri)]
     if touri is not None:
       rdf.append(Statement(stmt.subject, stmt.predicate, touri))
@@ -277,16 +271,17 @@ def transform_concepts(rdf, cs, typemap):
 
   # find out all the types used in the model
   types = set()
-  for s,o in rdf.subject_objects(RDF.type):
-    if o not in typemap and in_general_ns(o): continue
-    types.add(o)
+  for stmt in rdf.find_statements(Statement(None, RDF.type, None)):
+    o = stmt.object
+    if o.uri not in typemap and in_general_ns(o.uri): continue
+    types.add(o.uri)
 
   for t in types:
     if mapping_match(t, typemap):
       newval = mapping_get(t, typemap)
       debug("transform class %s -> %s" % (t, newval))
       if newval is None: # delete all instances
-        for inst in rdf.subjects(RDF.type, t):
+        for inst in rdf.sources(RDF.type, t):
           delete_uri(rdf, inst)
         delete_uri(rdf, t)
       else:
@@ -723,7 +718,7 @@ def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
     cs = create_concept_scheme(voc, options.namespace)
 
   # transform concepts, literals and concept relations
-#  transform_concepts(voc, cs, typemap)
+  transform_concepts(voc, cs, typemap)
 #  transform_literals(voc, literalmap)
 #  transform_relations(voc, relationmap) 
 
@@ -796,7 +791,7 @@ def get_option_parser(defaults):
 
 def expand_curielike(namespaces, curie):
   """Expand a CURIE (or a CURIE-like string with a period instead of colon
-  as separator) into URIRef. If the provided curie is not a CURIE, return it
+  as separator) into a Uri. If the provided curie is not a CURIE, return it
   unchanged."""
 
   if curie == '': return None
