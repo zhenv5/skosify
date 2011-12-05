@@ -85,8 +85,9 @@ def mapping_get(uri, mapping):
   # 3. try to match local names with * prefix
   # try to match longest first, so sort the mapping by key length
   l = mapping.items()
-  l.sort(key=lambda i: len(i[0]), reverse=True)
+  l.sort(key=lambda i: len(str(i[0])), reverse=True)
   for k,v in l:
+    k = str(k)
     if k[0] == '*' and ln.endswith(k[1:]):
       return v
   raise KeyError, uri
@@ -123,13 +124,13 @@ def replace_predicate(rdf, fromuri, touri, subjecttypes=None):
      the subject is one of the provided types."""
 
   if fromuri == touri: return
-  for stmt in rdf.find_statements(Statement(fromuri, None, None)):
+  for stmt in rdf.find_statements(Statement(None, fromuri, None)):
     if subjecttypes is not None:
       typeok = False
       for t in subjecttypes:
         if Statement(stmt.subject, RDF.type, t) in rdf: typeok = True
       if not typeok: continue
-    del rdf[Statement(s, fromuri, o)]
+    del rdf[Statement(stmt.subject, fromuri, stmt.object)]
     if touri is not None:
       rdf.append(Statement(stmt.subject, touri, stmt.object))
 
@@ -295,9 +296,11 @@ def transform_literals(rdf, literalmap):
   
   props = set()
   for t in affected_types:
-    for conc in rdf.subjects(RDF.type, t):
-      for p,o in rdf.predicate_objects(conc):
-        if isinstance(o, Literal) and (p in literalmap or not in_general_ns(p)):
+    for conc in rdf.sources(RDF.type, t):
+      for stmt in rdf.find_statements(Statement(conc, None, None)):
+        p = stmt.predicate.uri
+        o = stmt.object
+        if o.is_literal() and (p in literalmap or not in_general_ns(p)):
           props.add(p)
 
   for p in props:
@@ -717,7 +720,7 @@ def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
 
   # transform concepts, literals and concept relations
   transform_concepts(voc, cs, typemap)
-#  transform_literals(voc, literalmap)
+  transform_literals(voc, literalmap)
 #  transform_relations(voc, relationmap) 
 
   # special transforms for labels: whitespace, prefLabel vs altLabel
