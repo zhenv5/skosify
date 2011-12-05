@@ -116,9 +116,12 @@ def replace_subject(rdf, fromuri, touri):
   """Replace all occurrences of fromuri as subject with touri in the given
      model. If touri=None, will delete all occurrences of fromuri instead."""
   if fromuri == touri: return
-  for p, o in rdf.predicate_objects(fromuri):
-    rdf.remove((fromuri, p, o))
-    if touri is not None: rdf.add((touri, p, o))
+  for stmt in rdf.find_statements(Statement(fromuri, None, None)):
+    p = stmt.predicate
+    o = stmt.object
+    del rdf[Statement(fromuri, stmt.predicate, stmt.object)]
+    if touri is not None:
+      rdf.append(Statement(touri, stmt.predicate, stmt.object))
 
 def replace_predicate(rdf, fromuri, touri, subjecttypes=None):
   """Replace all occurrences of fromuri as predicate with touri in the given
@@ -127,24 +130,26 @@ def replace_predicate(rdf, fromuri, touri, subjecttypes=None):
      the subject is one of the provided types."""
 
   if fromuri == touri: return
-  for s, o in rdf.subject_objects(fromuri):
+  for stmt in rdf.find_statements(Statement(fromuri, None, None)):
     if subjecttypes is not None:
       typeok = False
       for t in subjecttypes:
-        if (s, RDF.type, t) in rdf: typeok = True
+        if Statement(stmt.subject, RDF.type, t) in rdf: typeok = True
       if not typeok: continue
-    rdf.remove((s, fromuri, o))
-    if touri is not None: rdf.add((s, touri, o))
+    del rdf[Statement(s, fromuri, o)]
+    if touri is not None:
+      rdf.append(Statement(stmt.subject, touri, stmt.object))
 
 def replace_object(rdf, fromuri, touri, predicate=None):
   """Replace all occurrences of fromuri as object with touri in the given
      model. If touri=None, will delete all occurrences of fromuri instead. If
      predicate is given, modify only triples with the given predicate."""
   if fromuri == touri: return
-  for s, p in rdf.subject_predicates(fromuri):
+  for stmt in rdf.find_statements(Statement(None, None, fromuri)):
     if predicate is not None and p != predicate: continue
-    rdf.remove((s, p, fromuri))
-    if touri is not None: rdf.add((s, p, touri))
+    del rdf[Statement(stmt.subject, stmt.predicate, fromuri)]
+    if touri is not None:
+      rdf.append(Statement(stmt.subject, stmt.predicate, touri))
 
 def replace_uri(rdf, fromuri, touri):
   """Replace all occurrences of fromuri with touri in the given model. If touri=None, will delete all occurrences of fromuri instead."""
@@ -197,29 +202,30 @@ def create_concept_scheme(rdf, ns, lname='conceptscheme'):
   if not ns:
     # see if there's an owl:Ontology and use that to determine namespace
     # FIXME what if there are several owl:Ontology instances? (TERO)
-    ont = None
     for ont in rdf.sources(RDF.type, OWL.Ontology):
       pass
     if not ont:
       error("No skos:ConceptScheme or owl:Ontology found, please set the vocabulary namespace using --namespace option")
-    if ont.endswith('/') or ont.endswith('#'):
-      ns = ont
+    if str(ont.uri).endswith('/') or str(ont.uri).endswith('#'):
+      ns = unicode(ont)
     else:
-      ns = ont + '/'
+      ns = unicode(ont.uri) + '/'
   
-  cs = NS(ns)[lname]
+  cs = Uri((ns + lname).encode('UTF-8')) # unicode objs don't always work here
   
   rdf.append(Statement(cs, RDF.type, SKOS.ConceptScheme))
   
   if ont is not None:
-    rdf.remove((ont, RDF.type, OWL.Ontology))
+    del rdf[Statement(ont, RDF.type, OWL.Ontology)]
     # remove owl:imports declarations
-    for o in rdf.objects(ont, OWL.imports):
-      rdf.remove((ont, OWL.imports, o))
+    for o in rdf.targets(ont, OWL.imports):
+      del rdf[Statement(ont, OWL.imports, o)]
     # remove protege specific properties
-    for p,o in rdf.predicate_objects(ont):
-      if p.startswith(URIRef('http://protege.stanford.edu/plugins/owl/protege#')):
-        rdf.remove((ont,p,o))
+    for stmt in rdf.find_statements(Statement(ont, None, None)):
+      p = stmt.predicate
+      o = stmt.object
+      if str(p.uri).startswith('http://protege.stanford.edu/plugins/owl/protege#'):
+        del rdf[Statement(ont,p,o)]
     # move remaining properties (dc:title etc.) of the owl:Ontology into the skos:ConceptScheme
     replace_uri(rdf, ont, cs)
     
