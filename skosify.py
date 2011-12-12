@@ -124,13 +124,13 @@ def replace_predicate(rdf, fromuri, touri, subjects=None):
      the subject is one of the provided subjects."""
 
   if fromuri == touri: return
-  for stmt in rdf.find_statements(Statement(None, fromuri, None)):
-    if subjects is not None:
-      if stmt.subject not in subjects:
-        continue
-    del rdf[Statement(stmt.subject, fromuri, stmt.object)]
-    if touri is not None:
-      rdf.append(Statement(stmt.subject, touri, stmt.object))
+  
+  if subjects is None: subjects = [None] # every subject
+  for subj in subjects:
+    for stmt in rdf.find_statements(Statement(subj, fromuri, None)):
+      del rdf[Statement(stmt.subject, fromuri, stmt.object)]
+      if touri is not None:
+        rdf.append(Statement(stmt.subject, touri, stmt.object))
 
 def replace_object(rdf, fromuri, touri, predicate=None):
   """Replace all occurrences of fromuri as object with touri in the given
