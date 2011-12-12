@@ -117,19 +117,17 @@ def replace_subject(rdf, fromuri, touri):
     if touri is not None:
       rdf.append(Statement(touri, stmt.predicate, stmt.object))
 
-def replace_predicate(rdf, fromuri, touri, subjecttypes=None):
+def replace_predicate(rdf, fromuri, touri, subjects=None):
   """Replace all occurrences of fromuri as predicate with touri in the given
      model. If touri=None, will delete all occurrences of fromuri instead.
-     If a subjecttypes sequence is given, modify only those triples where
-     the subject is one of the provided types."""
+     If a subjects sequence is given, modify only those triples where
+     the subject is one of the provided subjects."""
 
   if fromuri == touri: return
   for stmt in rdf.find_statements(Statement(None, fromuri, None)):
-    if subjecttypes is not None:
-      typeok = False
-      for t in subjecttypes:
-        if Statement(stmt.subject, RDF.type, t) in rdf: typeok = True
-      if not typeok: continue
+    if subjects is not None:
+      if stmt.subject not in subjects:
+        continue
     del rdf[Statement(stmt.subject, fromuri, stmt.object)]
     if touri is not None:
       rdf.append(Statement(stmt.subject, touri, stmt.object))
@@ -314,7 +312,7 @@ def transform_literals(rdf, literalmap):
     if mapping_match(p, literalmap):
       newval = mapping_get(p, literalmap)
       debug("transform literal %s -> %s" % (p, newval))
-      replace_predicate(rdf, p, newval, subjecttypes=affected_types)
+      replace_predicate(rdf, p, newval, subjects=instances)
     else:
       warn("Don't know what to do with literal %s" % p)
       
@@ -345,7 +343,7 @@ def transform_relations(rdf, relationmap):
     if mapping_match(p, relationmap):
       newval = mapping_get(p, relationmap)
       debug("transform relation %s -> %s" % (p, newval))
-      replace_predicate(rdf, p, newval, subjecttypes=affected_types)
+      replace_predicate(rdf, p, newval, subjects=instances)
     else:
       warn("Don't know what to do with relation %s" % p)
 
