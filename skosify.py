@@ -150,7 +150,18 @@ def replace_uri(rdf, fromuri, touri):
 
 def delete_uri(rdf, uri):
   """Delete all occurrences of uri in the given model."""
-  replace_uri(rdf, uri, None)
+  replace_uri(rdf, uri, None)  
+
+def delete_uris(rdf, uris):
+  """Delete all occurrences of uris in the given model."""
+
+  # make them Nodes if they aren't already
+  uris = set((Node(n) for n in uris))
+  
+  # remove triples that mention this uri in a single pass
+  for stmt in rdf:
+    if stmt.subject in uris or stmt.predicate in uris or stmt.object in uris:
+      del rdf[stmt]
 
 def find_prop_overlap(rdf, prop1, prop2):
   """Generate pairs of (subject,object) tuples which are connected by both prop1 and prop2."""
@@ -278,8 +289,7 @@ def transform_concepts(rdf, cs, typemap):
       newval = mapping_get(t, typemap)
       debug("transform class %s -> %s" % (t, newval))
       if newval is None: # delete all instances
-        for inst in rdf.sources(RDF.type, t):
-          delete_uri(rdf, inst)
+        delete_uris(rdf, rdf.sources(RDF.type, t))
         delete_uri(rdf, t)
       else:
         replace_object(rdf, t, newval, predicate=RDF.type)
@@ -412,6 +422,14 @@ def transform_collections(rdf):
              (localname(relProp), s, coll))
         del rdf[Statement(s, relProp, coll)]
 
+def items(rdf, list):
+  """Generator over items in a RDF collection"""
+  while list:
+    item = rdf.get_target(list, RDF.first)
+    if item:
+      yield item
+    list = rdf.get_target(list, RDF.rest)
+
 def transform_aggregate_concepts(rdf, cs, relationmap, aggregates):
   """Transform YSO-style AggregateConcepts into skos:Concepts within their
      own skos:ConceptScheme, linked to the regular concepts with
@@ -420,33 +438,43 @@ def transform_aggregate_concepts(rdf, cs, relationmap, aggregates):
 
   if not aggregates:
     debug("removing aggregate concepts")
+  else:
+    debug("keeping aggregate concepts")
 
   aggregate_concepts = []
+  to_delete = set()
 
-  relation = relationmap.get(OWL.equivalentClass, OWL.equivalentClass)
-  for conc, eq in rdf.subject_objects(relation):
-    eql = rdf.value(eq, OWL.unionOf, None)
+  relation = relationmap.get(OWL.equivalentClass.uri, OWL.equivalentClass)
+  debug("relation: " + str(relation))
+  for stmt in rdf.find_statements(Statement(None, relation, None)):
+    conc = stmt.subject
+    eq = stmt.object
+    eql = rdf.get_target(eq, OWL.unionOf)
     if eql is None:
       continue
     if aggregates:
       aggregate_concepts.append(conc)
-      for item in rdf.items(eql):
-        rdf.add((conc, SKOS.narrowMatch, item))
+      for item in items(rdf, eql):
+        rdf.append(Statement(conc, SKOS.narrowMatch, item))
     # remove the old equivalentClass-unionOf-rdf:List structure
-    rdf.remove((conc, relation, eq))
-    rdf.remove((eq, RDF.type, OWL.Class))
-    rdf.remove((eq, OWL.unionOf, eql))
+    del rdf[Statement(conc, relation, eq)]
+    del rdf[Statement(eq, RDF.type, OWL.Class)]
+    del rdf[Statement(eq, OWL.unionOf, eql)]
     # remove the rdf:List structure
-    delete_uri(rdf, eql)
+    to_delete.add(eql)
     if not aggregates:
-      delete_uri(rdf, conc)
+      to_delete.add(conc)
+  debug("deleting %d nodes" % len(to_delete))
+  delete_uris(rdf, to_delete)
+  
+  debug("got %d aggregate concepts" % len(aggregate_concepts))
   
   if len(aggregate_concepts) > 0:
-    ns = cs.replace(localname(cs), '')
+    ns = str(cs).replace(localname(cs), '')
     acs = create_concept_scheme(rdf, ns, 'aggregateconceptscheme')
-    debug("creating aggregate concept scheme %s" % acs)
+    debug("creating aggregate concept scheme %s" % str(acs))
     for conc in aggregate_concepts:
-      rdf.add((conc, SKOS.inScheme, acs))
+      rdf.append(Statement(conc, SKOS.inScheme, acs))
 
 
 def enrich_relations(rdf, use_narrower, use_transitive):
@@ -737,7 +765,7 @@ def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
 
   # special transforms for collections and aggregate concepts
   transform_collections(voc)
-#  transform_aggregate_concepts(voc, cs, relationmap, options.aggregates)
+  transform_aggregate_concepts(voc, cs, relationmap, options.aggregates)
 
   # enrichments: broader <-> narrower, related <-> related
 #  enrich_relations(voc, options.narrower, options.transitive)
