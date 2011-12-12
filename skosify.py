@@ -347,15 +347,14 @@ def transform_labels(rdf):
         del rdf[Statement(conc, labelProp, stmt.object)]
         rdf.append(Statement(conc, labelProp, newlabel))
 
-  return #FIXME candidateLabel not yet implemented with librdf
-
   # make skosext:candidateLabel either prefLabel or altLabel
   
   # make a set of (concept, language) tuples for concepts which have candidateLabels in some language
-  conc_lang = set([(c,l.language) for c,l in rdf.subject_objects(SKOSEXT.candidateLabel)])
+  clabel_stmts = rdf.find_statements(Statement(None, SKOSEXT.candidateLabel, None))
+  conc_lang = set([(stmt.subject, stmt.object.literal_value['language']) for stmt in clabel_stmts])
   for conc, lang in conc_lang:
     # check whether there are already prefLabels for this concept in this language
-    if lang not in [pl.language for pl in rdf.objects(conc, SKOS.prefLabel)]:
+    if lang not in [pl.literal_value['language'] for pl in rdf.targets(conc, SKOS.prefLabel)]:
       # no -> let's transform the candidate labels into prefLabels
       to_prop = SKOS.prefLabel
     else:
@@ -363,20 +362,10 @@ def transform_labels(rdf):
       to_prop = SKOS.altLabel
     
     # do the actual transform from candidateLabel to prefLabel or altLabel
-    for label in rdf.objects(conc, SKOSEXT.candidateLabel):
-      if label.language != lang: continue
-      rdf.remove((conc, SKOSEXT.candidateLabel, label))
-      rdf.add((conc, to_prop, label))
-  
-  
-  for conc, label in rdf.subject_objects(SKOSEXT.candidateLabel):
-    rdf.remove((conc, SKOSEXT.candidateLabel, label))
-    if label.language not in [pl.language for pl in rdf.objects(conc, SKOS.prefLabel)]:
-      # no prefLabel found, make this candidateLabel a prefLabel
-      rdf.add((conc, SKOS.prefLabel, label))
-    else:
-      # prefLabel found, make it an altLabel instead
-      rdf.add((conc, SKOS.altLabel, label))
+    for label in rdf.targets(conc, SKOSEXT.candidateLabel):
+      if label.literal_value['language'] != lang: continue
+      del rdf[Statement(conc, SKOSEXT.candidateLabel, label)]
+      rdf.append(Statement(conc, to_prop, label))
 
 def transform_collections(rdf):
   for coll in rdf.subjects(RDF.type, SKOS.Collection):
