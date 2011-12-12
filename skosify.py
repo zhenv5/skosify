@@ -294,15 +294,22 @@ def transform_literals(rdf, literalmap):
   
   affected_types = (SKOS.Concept, SKOS.Collection)
   
-  props = set()
+  # find out the set of all properties with literal values
+  # that have been used on any instances of affected_types
+  # and which make sense to transform
+  instances = set()
   for t in affected_types:
-    for conc in rdf.sources(RDF.type, t):
-      for stmt in rdf.find_statements(Statement(conc, None, None)):
-        p = stmt.predicate.uri
-        o = stmt.object
-        if o.is_literal() and (p in literalmap or not in_general_ns(p)):
-          props.add(p)
+    for inst in rdf.sources(RDF.type, t):
+      instances.add(inst)
 
+  props = set()
+  for stmt in rdf:
+    p = stmt.predicate.uri
+    if stmt.subject in instances and stmt.object.is_literal() \
+       and (p in literalmap or not in_general_ns(p)):
+      props.add(p)
+
+  # for each property, replace it with something else as described in literalmap
   for p in props:
     if mapping_match(p, literalmap):
       newval = mapping_get(p, literalmap)
@@ -317,14 +324,22 @@ def transform_relations(rdf, relationmap):
 
   affected_types = (SKOS.Concept, SKOS.Collection)
 
-  props = set()
+
+  # find out the set of all properties with non-literal values
+  # that have been used on any instances of affected_types
+  # and which make sense to transform
+  instances = set()
   for t in affected_types:
-    for conc in rdf.sources(RDF.type, t):
-      for stmt in rdf.find_statements(Statement(conc, None, None)):
-        p = stmt.predicate.uri
-        o = stmt.object
-        if o.is_resource() and (p in relationmap or not in_general_ns(p)):
-          props.add(p)
+    for inst in rdf.sources(RDF.type, t):
+      instances.add(inst)
+
+  props = set()
+  for stmt in rdf:
+    p = stmt.predicate.uri
+    if stmt.subject in instances and not stmt.object.is_literal() \
+       and (p in relationmap or not in_general_ns(p)):
+      props.add(p)
+
   
   for p in props:
     if mapping_match(p, relationmap):
@@ -342,7 +357,7 @@ def transform_labels(rdf):
       label = stmt.object.literal_value['string']
       lang = stmt.object.literal_value['language']
       if len(label.strip()) < len(label):
-        warn("Stripping whitespace from label of %s: '%s'" % (conc, label))
+        warn("Stripping whitespace from label of %s: '%s'" % (unicode(conc), unicode(label)))
         newlabel = Node(literal=label.strip(), language=lang)
         del rdf[Statement(conc, labelProp, stmt.object)]
         rdf.append(Statement(conc, labelProp, newlabel))
@@ -368,19 +383,19 @@ def transform_labels(rdf):
       rdf.append(Statement(conc, to_prop, label))
 
 def transform_collections(rdf):
-  for coll in rdf.subjects(RDF.type, SKOS.Collection):
-    broaders = set(rdf.objects(coll, SKOSEXT.broaderGeneric))
-    narrowers = set(rdf.subjects(SKOSEXT.broaderGeneric, coll))
+  for coll in rdf.sources(RDF.type, SKOS.Collection):
+    broaders = set(rdf.targets(coll, SKOSEXT.broaderGeneric))
+    narrowers = set(rdf.sources(SKOSEXT.broaderGeneric, coll))
     # remove the Collection from the hierarchy
     for b in broaders:
-      rdf.remove((coll, SKOSEXT.broaderGeneric, b))
+      del rdf[Statement(coll, SKOSEXT.broaderGeneric, b)]
     # replace the broaderGeneric relationship with inverse skos:member
     for n in narrowers:
-      rdf.remove((n, SKOSEXT.broaderGeneric, coll))
-      rdf.add((coll, SKOS.member, n))
+      del rdf[Statement(n, SKOSEXT.broaderGeneric, coll)]
+      rdf.append(Statement(coll, SKOS.member, n))
       # add a direct broaderGeneric relation to the broaders of the collection
       for b in broaders:
-        rdf.add((n, SKOSEXT.broaderGeneric, b))
+        rdf.append(Statement(n, SKOSEXT.broaderGeneric, b))
 
     # avoid using SKOS semantic relations as they're only meant for concepts
     # FIXME should maybe use some substitute for exactMatch for collections?
@@ -390,14 +405,14 @@ def transform_collections(rdf):
                     SKOS.mappingRelation,
                     SKOS.closeMatch, SKOS.exactMatch,
                     SKOS.broadMatch, SKOS.narrowMatch, SKOS.relatedMatch):
-      for o in rdf.objects(coll, relProp):
+      for o in rdf.targets(coll, relProp):
         warn("Removing concept relation %s -> %s from collection %s" %
              (localname(relProp), o, coll))
-        rdf.remove((coll, relProp, o))
-      for s in rdf.subjects(relProp, coll):
+        del rdf[Statement(coll, relProp, o)]
+      for s in rdf.sources(relProp, coll):
         warn("Removing concept relation %s <- %s from collection %s" %
              (localname(relProp), s, coll))
-        rdf.remove((s, relProp, coll))
+        del rdf[Statement(s, relProp, coll)]
 
 def transform_aggregate_concepts(rdf, cs, relationmap, aggregates):
   """Transform YSO-style AggregateConcepts into skos:Concepts within their
@@ -723,7 +738,7 @@ def skosify(inputfile, namespaces, typemap, literalmap, relationmap, options):
   transform_labels(voc)
 
   # special transforms for collections and aggregate concepts
-#  transform_collections(voc)
+  transform_collections(voc)
 #  transform_aggregate_concepts(voc, cs, relationmap, options.aggregates)
 
   # enrichments: broader <-> narrower, related <-> related
